@@ -1,17 +1,16 @@
 import os
+from langchain_huggingface import HuggingFaceEmbeddings
 os.environ["HF_HUB_DISABLE_SSL_VERIFICATION"] = "1"
 import ssl
 ssl._create_default_https_context = ssl._create_unverified_context
-
 try:
-    import httpx
-    
+    import httpx    
     original_client_init = httpx.Client.__init__
     def patched_client_init(self, *args, **kwargs):
         kwargs['verify'] = False
         original_client_init(self, *args, **kwargs)
     httpx.Client.__init__ = patched_client_init
-    
+
     original_async_client_init = httpx.AsyncClient.__init__
     def patched_async_client_init(self, *args, **kwargs):
         kwargs['verify'] = False
@@ -19,10 +18,8 @@ try:
     httpx.AsyncClient.__init__ = patched_async_client_init
 except Exception:
     pass
-
 try:
     import requests
-
     original_session_request = requests.Session.request
     def patched_session_request(self, method, url, **kwargs):
         kwargs['verify'] = False
@@ -30,13 +27,9 @@ try:
     requests.Session.request = patched_session_request
 except Exception:
     pass
-
 if __name__ == "__main__" and __package__ is None:
     import sys
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from langchain_huggingface import HuggingFaceEmbeddings
-
 def get_embedding_model():
     """
     Initializes and returns the HuggingFaceEmbeddings model.

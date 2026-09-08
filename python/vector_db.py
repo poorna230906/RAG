@@ -18,13 +18,11 @@ def build_faiss_index(documents, embedding_model, store_path="vector_store"):
         embedding_model
     )
 
-    print(f"Saving FAISS index locally to '{store_path}'...")
     vector_db.save_local(store_path)
     return vector_db
 
 # Test the FAISS index creation
 if __name__ == "__main__":
-    # Add parent directory to path so we can import python.* when run directly
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from python.load_data import load_data
     from python.preprocess import preprocess_data

@@ -27,7 +27,7 @@ def get_retriever(store_path="vector_store"):
     search_type="similarity_score_threshold",
     search_kwargs={
         "k": 3,
-        "score_threshold": 0.4
+        "score_threshold": 0.3
     }
 )
 
