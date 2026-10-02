@@ -27,17 +27,29 @@ try:
     requests.Session.request = patched_session_request
 except Exception:
     pass
+import sys
 from python.retriever import get_retriever
 from python.generator import generate_response
+from python.evaluate import evaluate_system
 
 def run_app():
     """
     Coordinates Pipeline 2:
     - Loads the FAISS retriever
-    - Loops to accept user queries
+    - Accepts user queries or 'evaluate' command
     - Retrieves context documents matching queries
-    - Generates responses
+    - Generates responses and dynamic ROUGE metrics
+    - Runs full dataset system evaluation when requested
     """
+    if len(sys.argv) > 1 and sys.argv[1].lower() in ("--eval", "--evaluate", "-e"):
+        print("[Pipeline] Running standalone RAG system evaluation...")
+        metrics = evaluate_system()
+        print("\n=== System Evaluation Results ===")
+        for metric, value in metrics.items():
+            print(f"  - {metric}: {value}")
+        print("=================================\n")
+        return
+
     print("Starting Pipeline 2: RAG Application Chat\n")
     store_path = "vector_store"
     if not os.path.exists(store_path):
@@ -51,7 +63,12 @@ def run_app():
     except Exception as e:
         print(f"Error loading retriever: {e}")
         return
-    print("\nSystem ready! Type 'exit' or 'quit' to close the application.\n")
+
+    print("\nSystem ready!")
+    print("Commands:")
+    print("  - Type 'evaluate' or 'eval' to run the benchmark evaluation")
+    print("  - Type 'exit' or 'quit' to close the application\n")
+
     while True:
         try:
             query = input("Ask a question: ")
@@ -61,6 +78,17 @@ def run_app():
         if query.strip().lower() in ("exit", "quit"):
             print("Exiting RAG Application. Goodbye!")
             break
+        if query.strip().lower() in ("evaluate", "eval"):
+            print("\n[Pipeline] Running full system evaluation benchmark...")
+            try:
+                metrics = evaluate_system()
+                print("\n=== System Evaluation Results ===")
+                for metric, value in metrics.items():
+                    print(f"  - {metric}: {value}")
+                print("=================================\n")
+            except Exception as e:
+                print(f"[Error] System evaluation failed: {e}\n")
+            continue
         if not query.strip():
             continue
         print("\n[RAG] Searching for relevant context passages...")
@@ -79,10 +107,14 @@ def run_app():
             result = generate_response(query, retrieved_docs)
             print("\n Answer ")
             print(result["answer"])
-            print("\n Grounding Evaluation ")
-            print("Status:", result["grounding"])
-            print("Score:", result["score"])
+            print("\n ROUGE Evaluation ")
+            print(f"Precision:   {result.get('precision', 0.0):.4f}")
+            print(f"Recall:      {result.get('recall', 0.0):.4f}")
+            print(f"ROUGE Score: {result.get('rouge_score', result.get('score', 0.0)):.4f}\n")
         except Exception as e:
             print(f"An error occurred while processing query: {e}\n")
+
 if __name__ == "__main__":
     run_app()
+
+

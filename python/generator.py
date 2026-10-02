@@ -65,73 +65,111 @@ llm = ChatAnthropic(
     model="claude-sonnet-5",
 )
 
-# Embedding model for grounding calculation
-embedding_model = get_embedding_model()
+def tokenize(text: str) -> list:
+    """Tokenize text into lowercase words, ignoring punctuation."""
+    if not text:
+        return []
+    return re.findall(r'\b\w+\b', text.lower())
+
+
+def calculate_rouge_score(answer: str, retrieved_docs) -> dict:
+    """
+    Calculates dynamic ROUGE score (ROUGE-1 F1), Precision, and Recall
+    between the generated answer and the retrieved context documents.
+
+    - Precision: Fraction of answer tokens present in retrieved context.
+    - Recall: Fraction of context tokens present in answer.
+    - ROUGE Score: Harmonic mean (F1 score) of Precision and Recall.
+    """
+    if not answer or not retrieved_docs:
+        return {
+            "precision": 0.0,
+            "recall": 0.0,
+            "rouge_score": 0.0
+        }
+
+    answer_tokens = tokenize(answer)
+    if not answer_tokens:
+        return {
+            "precision": 0.0,
+            "recall": 0.0,
+            "rouge_score": 0.0
+        }
+
+    # Extract context text from retrieved documents
+    context_passages = []
+    for doc in retrieved_docs:
+        if hasattr(doc, 'page_content') and doc.page_content:
+            context_passages.append(doc.page_content.strip())
+        elif isinstance(doc, str):
+            context_passages.append(doc.strip())
+
+    if not context_passages:
+        return {
+            "precision": 0.0,
+            "recall": 0.0,
+            "rouge_score": 0.0
+        }
+
+    # Combine full context for precision matching
+    full_context_text = " ".join(context_passages)
+    full_context_tokens = tokenize(full_context_text)
+
+    if not full_context_tokens:
+        return {
+            "precision": 0.0,
+            "recall": 0.0,
+            "rouge_score": 0.0
+        }
+
+    from collections import Counter
+    answer_counts = Counter(answer_tokens)
+    full_context_counts = Counter(full_context_tokens)
+
+    # Calculate token overlap between answer and context
+    overlap_count = sum(
+        min(count, full_context_counts[token])
+        for token, count in answer_counts.items()
+    )
+
+    # Precision: proportion of generated answer tokens supported by context
+    precision = overlap_count / len(answer_tokens)
+
+    # Recall: max recall across context passages or full context
+    best_passage_recall = 0.0
+    for passage in context_passages:
+        p_tokens = tokenize(passage)
+        if not p_tokens:
+            continue
+        p_counts = Counter(p_tokens)
+        p_overlap = sum(
+            min(count, p_counts[token])
+            for token, count in answer_counts.items()
+        )
+        p_recall = p_overlap / len(p_tokens)
+        if p_recall > best_passage_recall:
+            best_passage_recall = p_recall
+
+    full_context_recall = overlap_count / len(full_context_tokens)
+    recall = max(best_passage_recall, full_context_recall)
+
+    # ROUGE F1 Score
+    if precision + recall > 0:
+        rouge_score = (2 * precision * recall) / (precision + recall)
+    else:
+        rouge_score = 0.0
+
+    return {
+        "precision": round(precision, 4),
+        "recall": round(recall, 4),
+        "rouge_score": round(rouge_score, 4)
+    }
 
 
 def calculate_grounding_score(answer, retrieved_docs):
-    """
-    Calculates grounding score using semantic similarity.
-
-    Formula:
-    Grounding Score =
-    Average of the highest similarity score
-    for each answer sentence.
-    """
-
-    if not answer or not retrieved_docs:
-        return 0.0
-
-    # Split answer into sentences
-    sentences = re.split(r'(?<=[.!?])\s+', answer.strip())
-    sentences = [
-        sentence.strip()
-        for sentence in sentences
-        if sentence.strip()
-    ]
-
-    if not sentences:
-        return 0.0
-
-    # Get retrieved context
-    context_chunks = [
-        doc.page_content.strip()
-        for doc in retrieved_docs
-        if doc.page_content.strip()
-    ]
-
-    if not context_chunks:
-        return 0.0
-
-    # Create embeddings
-    answer_embeddings = embedding_model.embed_documents(sentences)
-    context_embeddings = embedding_model.embed_documents(context_chunks)
-
-    # Calculate cosine similarity
-    similarities = cosine_similarity(
-        answer_embeddings,
-        context_embeddings
-    )
-
-    sentence_scores = []
-
-    # Find the best matching context for each answer sentence
-    for row in similarities:
-        best_similarity = max(row)
-
-        best_similarity = max(
-            0.0,
-            min(1.0, float(best_similarity))
-        )
-
-        sentence_scores.append(best_similarity)
-
-    # Calculate average grounding score
-    grounding_score = (
-        sum(sentence_scores) / len(sentence_scores)
-    )
-
-    return round(grounding_score, 4)
+    """Legacy alias for calculate_rouge_score."""
+    metrics = calculate_rouge_score(answer, retrieved_docs)
+    return metrics["rouge_score"]
 
 
 def generate_response(query: str, retrieved_docs) -> dict:
@@ -143,7 +181,7 @@ def generate_response(query: str, retrieved_docs) -> dict:
     - API error tracking
     - Retry mechanism
     - Fallback answer
-    - Dynamic grounding score
+    - Dynamic Precision, Recall, and ROUGE score
     """
 
     # No relevant documents
@@ -153,7 +191,9 @@ def generate_response(query: str, retrieved_docs) -> dict:
                 "I could not find any relevant information "
                 "to answer your question."
             ),
-            "grounding": "Not Grounded",
+            "precision": 0.0,
+            "recall": 0.0,
+            "rouge_score": 0.0,
             "score": 0.0
         }
 
@@ -199,7 +239,7 @@ def generate_response(query: str, retrieved_docs) -> dict:
     response_text = None
     success = False
     last_exception = None
-    api_key = os.getenv("")
+    api_key = os.getenv("ANTHROPIC_API_KEY")
 
     # Claude API call
     for attempt in range(max_retries + 1):
@@ -242,26 +282,24 @@ def generate_response(query: str, retrieved_docs) -> dict:
         if any(keyword in answer_lower for keyword in refusal_keywords):
             return {
                 "answer": response_text,
-                "grounding": "Not Grounded",
+                "precision": 0.0,
+                "recall": 0.0,
+                "rouge_score": 0.0,
                 "score": 0.0
             }
 
-        # Calculate grounding score dynamically
-        score = calculate_grounding_score(
+        # Calculate Precision, Recall, and ROUGE score dynamically
+        metrics = calculate_rouge_score(
             response_text,
             retrieved_docs
         )
 
-        # Determine grounding status from calculated score
-        if score >= 0.70:
-            grounding = "Grounded"
-        else:
-            grounding = "Not Grounded"
-
         return {
             "answer": response_text,
-            "grounding": grounding,
-            "score": score
+            "precision": metrics["precision"],
+            "recall": metrics["recall"],
+            "rouge_score": metrics["rouge_score"],
+            "score": metrics["rouge_score"]
         }
 
     # API failure
@@ -285,18 +323,15 @@ def generate_response(query: str, retrieved_docs) -> dict:
             f"{doc.page_content.strip()}\n"
         )
 
-    fallback_score = calculate_grounding_score(
+    fallback_metrics = calculate_rouge_score(
         fallback_answer,
         retrieved_docs
     )
 
-    if fallback_score >= 0.70:
-        fallback_grounding = "Grounded"
-    else:
-        fallback_grounding = "Not Grounded"
-
     return {
         "answer": fallback_answer,
-        "grounding": f"Mitigated Fallback ({fallback_grounding})",
-        "score": fallback_score
+        "precision": fallback_metrics["precision"],
+        "recall": fallback_metrics["recall"],
+        "rouge_score": fallback_metrics["rouge_score"],
+        "score": fallback_metrics["rouge_score"]
     }

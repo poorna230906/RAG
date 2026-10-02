@@ -1,10 +1,23 @@
 import os
+import sys
 import json
 import ast
 from sklearn.metrics import recall_score
 from datasets import load_dataset
 from langchain_community.vectorstores import FAISS
-from python.embeddings import get_embedding_model
+
+try:
+    from python.embeddings import get_embedding_model
+    from python.generator import calculate_rouge_score, generate_response
+except ModuleNotFoundError:
+    try:
+        from embeddings import get_embedding_model
+        from generator import calculate_rouge_score, generate_response
+    except ModuleNotFoundError:
+        sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from python.embeddings import get_embedding_model
+        from python.generator import calculate_rouge_score, generate_response
+
 def load_evaluation_data():
     """Load BioASQ questions and their relevant passage IDs."""
     dataset = load_dataset(
@@ -13,6 +26,7 @@ def load_evaluation_data():
         split="test"
     )
     return dataset
+
 def parse_relevant_ids(value):
     """Convert relevant passage IDs into a set of strings."""
     if isinstance(value, list):
@@ -30,6 +44,7 @@ def parse_relevant_ids(value):
             except (ValueError, SyntaxError):
                 pass
     return set()
+
 def load_vector_database(store_path="vector_store"):
     """Load the existing FAISS vector database."""
     if not os.path.exists(store_path):
@@ -44,6 +59,7 @@ def load_vector_database(store_path="vector_store"):
         allow_dangerous_deserialization=True
     )
     return vector_db
+
 def calculate_recall(vector_db, evaluation_data, k):
     """
     Calculate Recall@k using the BioASQ relevant passage IDs.
@@ -79,11 +95,74 @@ def calculate_recall(vector_db, evaluation_data, k):
         zero_division=0
     )
     return round(recall, 4)
+
+def calculate_precision(vector_db, evaluation_data, k):
+    """
+    Calculate Precision@k using the BioASQ relevant passage IDs.
+    """
+    precisions = []
+    for row in evaluation_data:
+        question = row["question"]
+        relevant_ids = parse_relevant_ids(
+            row["relevant_passage_ids"]
+        )
+        if not relevant_ids:
+            continue
+        retrieved_docs = vector_db.similarity_search(
+            question,
+            k=k
+        )
+        retrieved_ids = {
+            str(doc.metadata.get("id"))
+            for doc in retrieved_docs
+        }
+        hits = len(relevant_ids.intersection(retrieved_ids))
+        precisions.append(hits / k)
+    if not precisions:
+        return 0.0
+    return round(sum(precisions) / len(precisions), 4)
+
+def calculate_rouge_at_k(precision, recall):
+    """Calculate ROUGE F1 score from Precision and Recall."""
+    if precision + recall > 0:
+        return round((2 * precision * recall) / (precision + recall), 4)
+    return 0.0
+
+def evaluate_generation_metrics(vector_db, evaluation_data, sample_size=10):
+    """
+    Evaluates LLM answer generation Precision, Recall, and ROUGE metrics by calling generator.py.
+    """
+    precisions = []
+    recalls = []
+    rouge_scores = []
+
+    total = len(evaluation_data)
+    limit = min(sample_size, total)
+    for i in range(limit):
+        row = evaluation_data[i]
+        question = row["question"]
+        retrieved_docs = vector_db.similarity_search(question, k=3)
+        if not retrieved_docs:
+            continue
+        # Call generate_response from generator.py
+        result = generate_response(question, retrieved_docs)
+        precisions.append(result.get("precision", 0.0))
+        recalls.append(result.get("recall", 0.0))
+        rouge_scores.append(result.get("rouge_score", 0.0))
+
+    if not precisions:
+        return 0.0, 0.0, 0.0
+
+    avg_precision = round(sum(precisions) / len(precisions), 4)
+    avg_recall = round(sum(recalls) / len(recalls), 4)
+    avg_rouge = round(sum(rouge_scores) / len(rouge_scores), 4)
+    return avg_precision, avg_recall, avg_rouge
+
 def load_api_error_metrics():
     """Read Claude API error metrics."""
     metrics_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "error_merics.json"
+        "error_metrics.json"
     )
     attempts = 0
     failures = 0
@@ -100,8 +179,9 @@ def load_api_error_metrics():
                 f"[Warning] Failed to read error metrics: {e}"
             )
     return attempts, failures, error_rate
+
 def evaluate_system():
-    """Evaluate the RAG retrieval system."""
+    """Evaluate the RAG retrieval and generation system."""
     print("Evaluating RAG system...")
     # Load evaluation questions
     evaluation_data = load_evaluation_data()
@@ -110,53 +190,59 @@ def evaluate_system():
     )
     # Load FAISS database
     vector_db = load_vector_database()
-    # Calculate Recall@3
-    print("Calculating Recall@3...")
-    recall_at_3 = calculate_recall(
+
+    # Calculate Recall@3, Precision@3, ROUGE@3 for retrieval
+    print("Calculating retrieval metrics @ k=3...")
+    recall_at_3 = calculate_recall(vector_db, evaluation_data, k=3)
+    precision_at_3 = calculate_precision(vector_db, evaluation_data, k=3)
+    rouge_at_3 = calculate_rouge_at_k(precision_at_3, recall_at_3)
+
+    # Calculate Recall@5, Precision@5, ROUGE@5 for retrieval
+    print("Calculating retrieval metrics @ k=5...")
+    recall_at_5 = calculate_recall(vector_db, evaluation_data, k=5)
+    precision_at_5 = calculate_precision(vector_db, evaluation_data, k=5)
+    rouge_at_5 = calculate_rouge_at_k(precision_at_5, recall_at_5)
+
+    # Calculate answer generation metrics by calling generator.py
+    print("Evaluating LLM answer generation metrics (calls generator.py)...")
+    gen_precision, gen_recall, gen_rouge = evaluate_generation_metrics(
         vector_db,
         evaluation_data,
-        k=3
+        sample_size=10
     )
-    # Calculate Recall@5
-    print("Calculating Recall@5...")
-    recall_at_5 = calculate_recall(
-        vector_db,
-        evaluation_data,
-        k=5
-    )
+
     # Calculate retrieval error rates
-    error_rate_at_3 = round(
-        1 - recall_at_3,
-        4
-    )
-    error_rate_at_5 = round(
-        1 - recall_at_5,
-        4
-    )
+    error_rate_at_3 = round(1 - recall_at_3, 4)
+
     # Load actual API error metrics
     (
         llm_attempts,
         llm_failures,
         llm_error_rate
     ) = load_api_error_metrics()
+
     # Final results
     results = {
+        "precision_at_3": precision_at_3,
         "recall_at_3": recall_at_3,
+        "rouge_at_3": rouge_at_3,
+        "precision_at_5": precision_at_5,
         "recall_at_5": recall_at_5,
+        "rouge_at_5": rouge_at_5,
+        "generation_precision": gen_precision,
+        "generation_recall": gen_recall,
+        "generation_rouge_score": gen_rouge,
         "error_rate_at_3": error_rate_at_3,
-        "error_rate_at_5": error_rate_at_5,
         "llm_api_attempts": llm_attempts,
         "llm_api_failures": llm_failures,
         "llm_api_error_rate": llm_error_rate
     }
     return results
+
+
 if __name__ == "__main__":
-
     print("\n--- RAG Evaluation ---")
-
     metrics = evaluate_system()
-
     print("\nResults:")
-
     for metric, value in metrics.items():
         print(f"{metric}: {value}")
