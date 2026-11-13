@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "biomedical-rag": {
+      "command": "D:\\RAG (2)\\RAG\\.venv\\Scripts\\python.exe",
+      "args": [
+        "D:\\RAG (2)\\RAG\\mcp_server.py"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    }
+  }
+}
+
