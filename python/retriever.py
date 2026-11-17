@@ -14,7 +14,11 @@ def get_retriever(store_path="vector_store"):
     from python.embeddings import get_embedding_model
     
     if not os.path.exists(store_path):
-        raise FileNotFoundError(f"FAISS index folder not found at '{store_path}'. Please run build_index.py first.")
+        candidate = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "vector_store")
+        if os.path.exists(candidate):
+            store_path = candidate
+        else:
+            raise FileNotFoundError(f"FAISS index folder not found at '{store_path}'. Please run build_index.py first.")
 
     print(f"Loading local FAISS index from '{store_path}'...")
     embedding_model = get_embedding_model()
@@ -24,12 +28,12 @@ def get_retriever(store_path="vector_store"):
         allow_dangerous_deserialization=True
     )
     return vector_db.as_retriever(
-    search_type="similarity_score_threshold",
-    search_kwargs={
-        "k": 3,
-        "score_threshold": 0.3
-    }
-)
+        search_type="similarity_score_threshold",
+        search_kwargs={
+            "k": 3,
+            "score_threshold": 0.2
+        }
+    )
 
 # Test the retriever
 if __name__ == "__main__":
@@ -42,7 +46,7 @@ if __name__ == "__main__":
         store_path = "../vector_store" if os.path.exists("../vector_store") else "vector_store"
         retriever = get_retriever(store_path=store_path)
         
-        query = "What is BioASQ?"
+        query = "How to use the not_equals class in andromeda?"
         print(f"Query: '{query}'")
         
         results = retriever.invoke(query)

@@ -51,9 +51,10 @@ def build_pipeline():
     print("\n[Pipeline] Step 3: Loading embedding model...")
     embedding_model = get_embedding_model()
     # Step 4: Build FAISS Vector Database and save
-    print("\n[Pipeline] Step 4: Building and saving FAISS index...")
-    vector_db = build_faiss_index(chunks, embedding_model, store_path="vector_store")
+    store_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vector_store")
+    print(f"\n[Pipeline] Step 4: Building and saving FAISS index to '{store_path}'...")
+    vector_db = build_faiss_index(chunks, embedding_model, store_path=store_path)
     print("Pipeline 1 Completed Successfully!")
-    print("Vector database is saved under 'vector_store/'")
+    print(f"Vector database is saved under '{store_path}'")
 if __name__ == "__main__":
     build_pipeline()

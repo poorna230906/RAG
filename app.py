@@ -51,7 +51,9 @@ def run_app():
         return
 
     print("Starting Pipeline 2: RAG Application Chat\n")
-    store_path = "vector_store"
+    store_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vector_store")
+    if not os.path.exists(store_path) and os.path.exists("vector_store"):
+        store_path = "vector_store"
     if not os.path.exists(store_path):
         print(f"Error: Vector store not found at '{store_path}'.")
         print("Please build the index first by running: python build_index.py\n")
@@ -101,8 +103,11 @@ def run_app():
             # Print matching passages metadata/contents briefly
             for idx, doc in enumerate(retrieved_docs):
                 passage_id = doc.metadata.get("id", "Unknown")
+                name = doc.metadata.get("name", "")
+                file_path = doc.metadata.get("file_path", "")
                 snippet = doc.page_content[:120].replace('\n', ' ')
-                print(f"  - Chunk {idx + 1} (ID: {passage_id}): \"{snippet}...\"")
+                extra = f" [{name} | {file_path}]" if name else ""
+                print(f"  - Chunk {idx + 1} (ID: {passage_id}){extra}: \"{snippet}...\"")
             print("\n Generating response")
             result = generate_response(query, retrieved_docs)
             print("\n Answer ")

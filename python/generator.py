@@ -62,7 +62,7 @@ def log_api_attempt(success: bool, error_msg: str = None):
 
 # Claude model
 llm = ChatAnthropic(
-    model="claude-sonnet-5",
+    model=os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022"),
 )
 
 def tokenize(text: str) -> list:
@@ -203,7 +203,7 @@ def generate_response(query: str, retrieved_docs) -> dict:
     )
     # Prompt for Claude
     prompt = (
-        "You are a biomedical question-answering assistant.\n"
+        "You are an AI Python code assistant and copilot.\n"
         "Your task is to answer the user's question using ONLY the "
         "information provided in the retrieved context.\n\n"
         "Follow these rules strictly:\n"
@@ -217,9 +217,9 @@ def generate_response(query: str, retrieved_docs) -> dict:
         "there is not enough relevant information in the provided "
         "context.\n"
         "5.Keep the answer direct, clear, and concise.\n"
-        "6.Answer exactly what the user asked and avoid "
-        "unnecessary details.\n"
-        "7.When possible, use the terminology and facts given "
+        "6.Answer exactly what the user asked and provide code examples, "
+        "arguments, returns, or architectural explanations if given in context.\n"
+        "7.When possible, use the exact identifiers, classes, methods, and facts given "
         "in the context.\n"
         "8.If multiple retrieved passages provide relevant "
         "information, combine them carefully without adding "
@@ -311,6 +311,7 @@ def generate_response(query: str, retrieved_docs) -> dict:
     )
 
     # Fallback answer
+    print(f"\n[Notice] LLM API call failed ({err_msg[:120]}). Using retrieved context as fallback.")
     fallback_answer = (
         "[Fallback Answer - API Error Mitigated]\n"
         "An error occurred while generating the LLM response, "
